@@ -1,0 +1,1202 @@
+ <html>
+	<head>
+		<title>Route Lens</title>
+		
+		<style>
+			body, #container {
+				font-family: Monospace;
+				color: #ff0000;
+				contextMap-color: #ffffff;
+				overflow: hidden;
+				margin: 0;
+        		padding: 0;
+        		height: 100%;
+			}
+
+		</style>
+	</head>
+	
+	<body>
+		<div id="container"></div>
+		
+		<script src="js/three.min.js"></script>
+		<script src="js/stats.min.js"></script>
+		<script src="js/TrackballControls.js"></script>
+		<script src="js/TubeGeometry.js"></script>
+		
+    	<script id="fragment_shader_basic" type="x-shader/x-fragment">
+
+			varying vec2 vUv;
+			uniform sampler2D focusTexture;
+
+			void main() {
+
+				gl_FragColor = texture2D( focusTexture, vUv );
+
+			}
+
+		</script>
+
+		<script id="fragment_shader_lens_old" type="x-shader/x-fragment">
+
+			uniform sampler2D focusTexture;
+			uniform vec2 rLens;
+			uniform vec2 lensPosition;
+	
+			varying vec2 vUv;
+
+			void main() {
+		
+				vec2 fragCoord = vec2(gl_FragCoord);
+				float carpendale_dist = distance(fragCoord,lensPosition);
+		
+				//lens area
+				if ( carpendale_dist < rLens.x ) {
+					gl_FragColor = texture2D( focusTexture, vUv );
+				}
+		
+				//transition area
+				else if ( carpendale_dist < rLens.y ) {
+					float alpha = 0.9; //0.9
+					float deltaR = rLens.y - rLens.x;
+					
+					gl_FragColor =  texture2D(focusTexture, vUv);
+					
+					//change the translucence level
+					gl_FragColor.a = alpha / deltaR * (rLens.y - carpendale_dist);
+					
+				}
+
+				else {
+					//gl_FragColor =  texture2D(focusTexture, vUv);
+					//gl_FragColor.a = 0.8;
+					discard;
+				}
+
+
+			}
+
+		</script>
+		
+		
+		<script id="fragment_shader_lens" type="x-shader/x-fragment">
+            #define PI 3.14159265
+
+			uniform sampler2D focusTexture;
+			uniform vec2 rLens;
+			uniform vec2 lensPosition, cursorPosition;
+			
+			uniform vec2 texelSize;
+			uniform vec2 textureSize;
+			uniform float invmag;
+			
+			uniform float showLensEdge;
+			
+			varying vec2 vUv;
+
+			void main() {
+				float distX, distY, focusX, focusY;
+				vec2 fragCoord = vec2(gl_FragCoord);
+				float carpendale_dist = distance(fragCoord,lensPosition);
+				float carpendale_dist_cursor = distance(fragCoord,cursorPosition);
+		
+				//lens area
+				if ( carpendale_dist < rLens.x ) {
+					gl_FragColor = texture2D( focusTexture, vUv );
+					//gl_FragColor.a = 0.7;
+				}
+		
+				//transition area
+				else if ( carpendale_dist < rLens.y ) {
+					distX = (fragCoord.x - lensPosition.x);
+					distY = (fragCoord.y - lensPosition.y);
+					
+					//change the translucence level
+					float alpha =  (carpendale_dist - rLens.x) / (rLens.y - rLens.x);
+					alpha  = 1.0 - ((cos(alpha * PI) + 1.0) / 2.0);
+					
+					focusX = (lensPosition.x + (distX/(alpha*(invmag-1.0)+1.0)))*texelSize.x;
+					focusY = (lensPosition.y + (distY/(alpha*(invmag-1.0)+1.0)))*texelSize.y;
+					//focusX = fragCoord.x*texelSize.x;
+					//focusY = fragCoord.y*texelSize.y;
+					
+					gl_FragColor =  texture2D(focusTexture, vec2(focusX,focusY));
+					//gl_FragColor.a = 0.7;
+					
+					//distortion area
+					if (carpendale_dist >= rLens.y-2.0) // || carpendale_dist <= rLens.x+2.0)
+					{
+						gl_FragColor.a = 0.5;
+						gl_FragColor.r = 1.0;
+						gl_FragColor.g = 1.0;
+						gl_FragColor.b = 1.0;
+					}
+				}
+
+
+				else {
+					discard;
+				}
+				
+				//show details
+				if ( showLensEdge != 0.0 ) {
+					//blue cursor edge
+					if ( carpendale_dist_cursor > rLens.x && carpendale_dist_cursor < rLens.x+4.0 ) {
+						gl_FragColor = texture2D( focusTexture, vUv );
+						//gl_FragColor.a = 0.5;
+						gl_FragColor.r = 0.0;
+						gl_FragColor.g = 0.0;
+						gl_FragColor.b = 1.0;
+					}
+				
+					//red lens edge
+					if ( carpendale_dist > rLens.x && carpendale_dist < rLens.x+4.0 ) {
+						gl_FragColor.r = 1.0;
+						gl_FragColor.g = 0.0;
+						gl_FragColor.b = 0.0;
+					}
+					
+					//lens center
+					distX = (fragCoord.x - lensPosition.x);
+					distY = (fragCoord.y - lensPosition.y);
+					if ( ( distX < 2.0 && distX > -2.0 && distY < 10.0 && distY > -10.0 ) || 
+						 ( distY < 2.0 && distY > -2.0 && distX < 10.0 && distX > -10.0 ) )
+					{
+						gl_FragColor = texture2D( focusTexture, vUv );
+						gl_FragColor.r = 1.0;
+						gl_FragColor.g = 0.0;
+						gl_FragColor.b = 0.0;
+					}
+				}
+
+
+			}
+
+		</script>
+
+		<script id="vertexShader" type="x-shader/x-vertex">
+
+			varying vec2 vUv;
+
+			void main() {
+
+				vUv = uv;
+				gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+
+			}
+
+		</script>
+	
+	
+		<script type="text/javascript">
+			// set the contextScene size
+			var WIDTH = window.innerWidth,
+				HEIGHT = window.innerHeight;
+
+			// set some camera attributes
+			var VIEW_ANGLE = 45,
+				ASPECT = WIDTH / HEIGHT,
+				NEAR = 1,
+				FAR = 10000;
+
+			// get the DOM element to attach to
+			// - assume we've got jQuery to hand
+			var container = document.getElementById("container");
+
+			// create a WebGL renderer, camera, and scene
+			var renderer, control, contextCamera, contextScene, projector, gl;
+			var focusRenderer, scaledScene, material;
+			
+			// create a contextMap and an array to store all objects
+			var contextMap;
+			var objects = [];
+					
+			// create variables for picking and dragging
+			var SELECTED;
+			var PICKED;
+			var mouse = new THREE.Vector2()							//webGL coordinate
+			var client = new THREE.Vector2( WIDTH/2, HEIGHT/2 );	//browser coordinate
+			
+			//create variables for showing information and controls
+			var stats;
+			var controls;
+			
+			//create variables for dynamic drawing
+			var isDrawingMode = false;
+			var startPoint = new THREE.Vector3();
+			var endPoint = new THREE.Vector3();
+			
+			//create variables for magnification
+			var isMagnificationMode = false;
+			var focusMap, material;
+			var focusMapSize = new THREE.Vector2();
+			
+			//create variables for rendering to texture
+			var focusRenderer;
+			var scaledMap, scaledScene, renderedSceneTexture;
+			
+			//create variable for path following
+			var pathObjects = [], pointedPath = [], indexPointedPath = -1;
+			var lensPosition = new THREE.Vector2();
+			var pathArea = 45/2.0;
+			var closestPoint = new THREE.Vector2(), tangentOfClosestPoint = new THREE.Vector2();
+			var resAttractionVector, resNormalizedAttractionVector, isOutPathArea = false, attractionVectors = [];
+			var distMouse;
+			var vectorLines = [];
+			var showVectorLines = false;
+			
+			//create variable for route decision
+			var intersections = [];
+			var intersectionAreaRadius = 10;
+			
+			init();
+			animate();
+			
+					
+			function init() {
+				/////////////////
+				//init renderer//
+				/////////////////
+				projector = new THREE.Projector();
+				
+				renderer = new THREE.WebGLRenderer( { antialias: true } );
+		
+				// start the renderer
+				renderer.setSize(WIDTH, HEIGHT);
+				renderer.sortObjects = false;
+				renderer.autoClear = false;
+				
+				// attach the render-supplied DOM element
+				container.appendChild( renderer.domElement );
+				
+				// renderer to render to texture
+				focusRenderer = new THREE.WebGLRenderer( { antialias: true } );
+				focusRenderer.setSize(WIDTH, HEIGHT);
+				focusRenderer.sortObjects = true;
+				focusRenderer.autoClear = false;
+			
+			
+				//////////////
+				//init scene//
+				//////////////
+				contextScene = new THREE.Scene();
+				scaledScene = new THREE.Scene();
+
+
+				///////////////
+				//init camera//
+				///////////////
+				contextCamera = new THREE.PerspectiveCamera(VIEW_ANGLE, ASPECT, NEAR, FAR);
+				contextCamera.position.z = 300;
+				contextScene.add(contextCamera);
+				
+				scaledCamera = new THREE.PerspectiveCamera(VIEW_ANGLE, ASPECT, NEAR, FAR);
+				scaledCamera.position.z = 300;
+				scaledScene.add(scaledCamera);
+
+
+				//////////////
+				//init light//
+				//////////////
+				// create a point white light
+				var pointLight = new THREE.SpotLight( 0xffffff );
+				pointLight.position.x = 0;
+				pointLight.position.y = 500;
+				pointLight.position.z = 2000;
+				
+				// add light to the contextScene
+				contextScene.add(pointLight);
+				scaledScene.add(pointLight.clone());
+				
+				
+				///////////////////
+				//add black plane//
+				///////////////////
+				var plane = new THREE.Mesh( 
+									new THREE.PlaneGeometry( WIDTH, HEIGHT ),
+									new THREE.MeshBasicMaterial( { color: 0x000000 } )
+							);
+				plane.position.z = -1;
+				contextScene.add( plane );
+				
+				
+				///////////////
+				//draw object//
+				///////////////
+				pathObjects.push (
+					addPath ( [
+						new THREE.Vector3(-102.39328032430464, -87.8129979207573, 0),
+						new THREE.Vector3(-97.75410257498218, -86.48751870685798, 0),
+						new THREE.Vector3(-96.42862321803395, -86.81888851033315, 0),
+						new THREE.Vector3(-95.76588353955745, -86.48751870685673, 0),
+						new THREE.Vector3(-95.10314386108283, -86.48751870685658, 0),
+						new THREE.Vector3(-92.78355498642541, -84.4992998860122, 0),
+						new THREE.Vector3(-92.45218514718924, -82.5110810651658, 0),
+						new THREE.Vector3(-91.45807562947441, -79.86012263736656, 0),
+						new THREE.Vector3(-89.46985659405064, -78.534643423468, 0),
+						new THREE.Vector3(-86.81889788015165, -71.90724735397605, 0),
+						new THREE.Vector3(-82.51108997007238, -67.26807010533618, 0),
+						new THREE.Vector3(-81.51698045235874, -64.94848148101269, 0),
+						new THREE.Vector3(-78.20328205998538, -60.64067403584267, 0),
+						new THREE.Vector3(-76.87780270303742, -59.646564625419764, 0), 
+						new THREE.Vector3(-74.88958366761153, -58.3210854115196, 0),
+						new THREE.Vector3(-75.22095350685007, -56.66423639414787, 0),
+						new THREE.Vector3(-76.21506302456402, -55.00738737677678, 0), 
+						new THREE.Vector3(-80.19150109540807, -51.6936893420294, 0),
+						new THREE.Vector3(-80.5228709346458, -43.07807445169142, 0),
+						new THREE.Vector3(-77.54054238151296, -41.421225434319844, 0),
+						new THREE.Vector3(-76.54643286380177, -41.752595237794715, 0), 
+						new THREE.Vector3(-73.89547414990247, -38.77026700652293, 0),
+						new THREE.Vector3(-73.23273447142763, -39.10163680999727, 0),
+						new THREE.Vector3(-72.90136463219106, -36.782048185675734, 0),
+						new THREE.Vector3(-74.5582138283765, -35.1251991683026, 0),
+						new THREE.Vector3(-75.22095350684981, -31.480131330082056, 0),
+						new THREE.Vector3(-74.55821382837584, -29.16054270576039, 0),
+						new THREE.Vector3(-74.88958366761244, -28.1664332953365, 0),
+						new THREE.Vector3(-74.889583667615, -25.84684467101556, 0),
+						new THREE.Vector3(-75.8836931853258, -24.189995653642494, 0),
+						new THREE.Vector3(-75.5523233460867, -22.864516439743692, 0),
+						new THREE.Vector3(-74.88958366761452, -22.533146636269837, 0),
+						new THREE.Vector3(-74.22684398913881, -21.207667422371262, 0),
+						new THREE.Vector3(-75.55232334608796, -18.88807879804945, 0),
+						new THREE.Vector3(-74.88958366761254, -17.231229780676482, 0),
+						new THREE.Vector3(-73.89547414990275, -16.237120370253255, 0),
+						new THREE.Vector3(-73.5641043106632, -15.243010959829103, 0),
+						new THREE.Vector3(-73.56410431066648, -13.917531745931552, 0),
+						new THREE.Vector3(-73.23273447142772, -12.592052532033028, 0),
+						new THREE.Vector3(-74.55821382837556, -10.272463907711009, 0),
+						new THREE.Vector3(-74.88958366761469, -6.9587658729657065, 0),
+						new THREE.Vector3(-75.55232334608877, -5.301916855592882, 0),
+						new THREE.Vector3(-76.87780270303624, 2.31958862432185, 0),
+						new THREE.Vector3(-77.20917254227606, 2.9823282312710457, 0),
+						new THREE.Vector3(-77.54054238151102, 3.6450678382200556, 0),
+						new THREE.Vector3(-76.8778027030392, 4.970547052118432, 0),
+						new THREE.Vector3(-77.8719122207485, 5.964656462541934, 0),
+						new THREE.Vector3(-77.87191222074988, 7.621505479914824, 0),
+						new THREE.Vector3(-77.20917254227511, 8.615614890338465, 0),
+						new THREE.Vector3(-75.8836931853264, 10.272463907711272, 0),
+						new THREE.Vector3(-76.21506302456278, 10.935203514660262, 0),
+						new THREE.Vector3(-76.21506302456088, 11.929312925083623, 0),
+						new THREE.Vector3(-77.2091725422747, 13.586161942456727, 0),
+						new THREE.Vector3(-79.19739157769831, 13.586161942456766, 0),
+						new THREE.Vector3(-81.84835029159758, 22.533146636270164, 0),
+						new THREE.Vector3(-83.50519948778074, 26.178214474489383, 0),
+						new THREE.Vector3(-84.16793916625495, 27.50369368838751, 0),
+						new THREE.Vector3(-85.8247883624411, 29.491912509234787, 0),
+						new THREE.Vector3(-87.81300739786357, 33.13698034745451, 0),
+						new THREE.Vector3(-89.80122643328733, 34.793829364827396, 0),
+						new THREE.Vector3(-91.45807562947695, 38.438897203048874, 0),
+						new THREE.Vector3(-89.80122643328633, 40.0957462204197, 0),
+						new THREE.Vector3(-90.46396611176313, 41.42122543431894, 0)
+					] )
+				);
+				pathObjects.push (
+					addPath ( [
+						new THREE.Vector3(-90.46396611176313, 41.42122543431894, 0),
+						new THREE.Vector3(-91.4580756294748, 42.415334844742596, 0),
+						new THREE.Vector3(-90.7953359509994, 42.74670464821669, 0),
+						new THREE.Vector3(-90.79533595100295, 43.07807445169293, 0),
+						new THREE.Vector3(-90.46396611176334, 43.40944425516636, 0),
+						new THREE.Vector3(-90.4639661117649, 44.40355366559077, 0),
+						new THREE.Vector3(-88.47574707633842, 44.40355366558923, 0),
+						new THREE.Vector3(-85.82478836244069, 46.39177248643652, 0),
+						new THREE.Vector3(-84.49930900549283, 46.39177248643709, 0),
+						new THREE.Vector3(-81.84835029159788, 47.38588189686242, 0),
+						new THREE.Vector3(-80.19150109540928, 48.71136111075921, 0),
+						new THREE.Vector3(-78.86602173845839, 49.374100717707066, 0),
+						new THREE.Vector3(-77.87191222074694, 50.36821012813084, 0),
+						new THREE.Vector3(-76.87780270303763, 50.69957993160694, 0),
+						new THREE.Vector3(-70.91314559676658, 54.0132779663518, 0),
+						new THREE.Vector3(-69.25629640058058, 55.33875718025011, 0),
+						new THREE.Vector3(-67.59944720439572, 55.00738737677661, 0),
+						new THREE.Vector3(-64.28574881202272, 56.33286659067425, 0),
+						new THREE.Vector3(-63.29163929431197, 56.66423639414967, 0),
+						new THREE.Vector3(-57.658352027279314, 58.983825018471954, 0), 
+						new THREE.Vector3(-34.131093441433734, 64.94848148101077, 0),
+						new THREE.Vector3(-23.85862842508006, 69.91902853312942, 0),
+						new THREE.Vector3(-18.888080836522562, 70.91313794355625, 0),
+						new THREE.Vector3(-17.562601479573534, 70.5817681400814, 0),
+						new THREE.Vector3(-14.580272926438154, 70.91313794355474, 0),
+						new THREE.Vector3(-12.923423730252255, 70.91313794355614, 0),
+						new THREE.Vector3(-6.62739678474452, 71.24450774702818, 0),
+						new THREE.Vector3(-1.3254793569489327, 70.58176814008061, 0),
+						new THREE.Vector3(3.645068231609561, 71.90724735397878, 0),
+						new THREE.Vector3(6.627396784744663, 70.58176814008063, 0),
+						new THREE.Vector3(12.923423730251612, 69.2562889261798, 0),
+						new THREE.Vector3(14.9116427656754, 68.59354931923284, 0),
+						new THREE.Vector3(16.899861801098307, 69.91902853312908, 0),
+						new THREE.Vector3(17.893971318810713, 70.25039833660654, 0),
+						new THREE.Vector3(18.225341158047346, 71.57587755050241, 0),
+						new THREE.Vector3(21.20766971118253, 72.56998696092673, 0),
+						new THREE.Vector3(22.533149068131877, 72.56998696092815, 0),
+						new THREE.Vector3(23.858628425080024, 73.23272656787482, 0),
+						new THREE.Vector3(26.178217299740513, 76.87779440609465, 0),
+						new THREE.Vector3(28.829176013639717, 78.2032736199967, 0),
+						new THREE.Vector3(29.49191569211284, 79.52875283389129, 0),
+						new THREE.Vector3(30.154655370587662, 79.52875283389227, 0),
+						new THREE.Vector3(32.80561408448582, 80.1914924408422, 0),
+						new THREE.Vector3(33.799723602198235, 78.8660132269457, 0),
+						new THREE.Vector3(34.793833119909735, 77.8719038165215, 0),
+						new THREE.Vector3(35.787942637620475, 78.86601322694308, 0),
+						new THREE.Vector3(37.44479183380699, 79.86012263736752, 0),
+						new THREE.Vector3(38.43890135151961, 79.86012263736944, 0),
+						new THREE.Vector3(40.42712038694231, 78.86601322694436, 0),
+						new THREE.Vector3(41.42122990465435, 78.86601322694501, 0),
+						new THREE.Vector3(41.752599743890514, 78.53464342346841, 0),
+						new THREE.Vector3(42.746709261602675, 78.86601322694386, 0),
+						new THREE.Vector3(43.7408187793154, 77.87190381652204, 0),
+						new THREE.Vector3(46.391777493211876, 77.20916420957052, 0),
+						new THREE.Vector3(48.37999652863596, 76.54642460262255, 0),
+						new THREE.Vector3(49.37410604634649, 76.54642460262073, 0),
+						new THREE.Vector3(52.35643459948255, 75.88368499567315, 0),
+						new THREE.Vector3(53.68191395643043, 76.54642460262076, 0),
+						new THREE.Vector3(55.00739331338048, 76.54642460262238, 0),
+						new THREE.Vector3(57.32698218803913, 77.54053401304338, 0),
+						new THREE.Vector3(59.6465710626997, 77.20916420956884, 0),
+						new THREE.Vector3(62.29752977659964, 77.87190381652071, 0),
+						new THREE.Vector3(63.62300913354927, 77.54053401304702, 0),
+						new THREE.Vector3(64.61711865125793, 77.87190381651789, 0),
+						new THREE.Vector3(70.9131455967674, 77.20916420957128, 0),
+						new THREE.Vector3(71.90725511447721, 76.87779440609472, 0),
+						new THREE.Vector3(73.23273447142965, 77.209164209573, 0),
+						new THREE.Vector3(74.55821382837831, 76.87779440609816, 0),
+						new THREE.Vector3(80.8542407738821, 77.5405340130437, 0),
+						new THREE.Vector3(82.1797201308344, 77.54053401304692, 0),
+						new THREE.Vector3(86.15615820168155, 77.87190381652175, 0),
+						new THREE.Vector3(87.48163755862878, 78.8660132269439, 0),
+						new THREE.Vector3(88.47574707633878, 78.86601322694239, 0),
+						new THREE.Vector3(92.45218514718924, 82.5110810651658, 0),
+						new THREE.Vector3(93.7776645041378, 82.51108106516543, 0),
+						new THREE.Vector3(97.09136289650907, 83.83656027906274, 0),
+						new THREE.Vector3(98.7482120926931, 83.83656027906093, 0),
+						new THREE.Vector3(101.3991708065931, 82.84245086863909, 0),
+						new THREE.Vector3(103.38738984201562, 83.83656027906204, 0),
+						new THREE.Vector3(105.04423903820447, 83.50519047558966, 0),
+						new THREE.Vector3(107.36382791286309, 83.50519047558805, 0),
+						new THREE.Vector3(107.69519775210154, 84.16793008253812, 0),
+						new THREE.Vector3(110.3461564659944, 85.49340929643246, 0),
+						new THREE.Vector3(112.334375501418, 85.8247790999072, 0),
+						new THREE.Vector3(114.32259453684736, 86.48751870686085, 0),
+						new THREE.Vector3(115.64807389378959, 85.4934092964322, 0),
+						new THREE.Vector3(116.64218341150158, 85.49340929643246, 0),
+						new THREE.Vector3(118.96177228616524, 84.83066968948559, 0),
+						new THREE.Vector3(118.29903260769186, 83.83656027906271, 0)
+					] )
+				);
+				
+				//add all path to scene
+				for ( var i=0; i < pathObjects.length; i++ ) {
+					contextScene.add( pathObjects[i].path );
+					objects.push( pathObjects[i].path );
+				}
+				
+				
+				////////////////////
+				//add intersection//
+				////////////////////
+				//add intersection
+				intersections.push( new THREE.Vector3(-25, 15, 0) );
+				intersections.push( new THREE.Vector3(-1, 3, 0) );
+				intersections.push( new THREE.Vector3(-17, 28, 0) );
+				intersections.push( new THREE.Vector3(46, -1, 0) );
+				
+				
+				//////////////////
+				//add contextMap//
+				//////////////////
+				//var contextTexture = new THREE.ImageUtils.loadTexture( 'texture/1_cut.png' );
+				contextMap = new THREE.Mesh( 
+								new THREE.PlaneGeometry( 400, 300 ),
+								new THREE.MeshBasicMaterial( {
+											map: new THREE.ImageUtils.loadTexture( 'texture/1-2_cut.png' ),
+											//wireframe: true,
+											side: THREE.DoubleSide
+									} )
+						);
+				contextMap.children = objects;
+				contextScene.add( contextMap );
+				
+				
+				/////////////////
+				//add scaledMap//
+				/////////////////
+				scaledMap = new THREE.Mesh( 
+								new THREE.PlaneGeometry( 1600, 1200 ),
+								new THREE.MeshBasicMaterial( {
+											map: new THREE.ImageUtils.loadTexture( 'texture/4-2_cut.png' ),
+											//wireframe: true,
+											side: THREE.DoubleSide
+									} )
+							);
+				for ( var i=0; i < contextMap.children.length; i++ ) {
+					var child = contextMap.children[i].clone();
+					child.position.z = -2;
+					
+					scaledMap.children.push( child );
+				}
+				scaledScene.add( scaledMap );
+				
+				
+				///////////////
+				//gl context///
+				///////////////
+				gl = self.renderer.getContext();
+								
+				
+				////////////////
+				//init control//
+				////////////////
+				controls = new THREE.TrackballControls( 
+								contextCamera, 
+								contextMap, 
+								scaledMap, 
+								pathObjects, 
+								intersections
+						   );
+				controls.noRotate = true;
+				controls.noZoom = false;
+				controls.noPan = false;
+				controls.zoomSpeed = 10.0;
+				controls.panSpeed = 0.8;
+				controls.staticMoving = true;
+				controls.dynamicDampingFactor = 0.3;
+				
+				
+				///////////////////////
+				//add shader material//
+				///////////////////////
+				//create custom shader as a material for the focus area
+				material = new THREE.ShaderMaterial( {
+					uniforms: {
+									focusTexture	:{ type: "t", value: renderedSceneTexture },
+									lensPosition	:{ type: "v2", value: new THREE.Vector2( 0, 0 ) },
+									cursorPosition	:{ type: "v2", value: new THREE.Vector2( 0, 0 ) },
+									rLens 			:{ type: "v2", value: new THREE.Vector2( 90, 130 ) },
+									texelSize		:{ type: "v2", value: new THREE.Vector2( 1.0/WIDTH,  1.0/HEIGHT ) },
+                                    textureSize		:{ type: "v2", value: new THREE.Vector2( WIDTH,HEIGHT ) },
+                                    invmag			:{ type: "f", value: 1.0/controls.magnifyingFactor },
+                                    showLensEdge	:{ type: "f", value: 0.0 }
+							  },
+					vertexShader: document.getElementById( 'vertexShader' ).textContent,
+					fragmentShader: document.getElementById( 'fragment_shader_lens' ).textContent,
+					depthWrite: false
+
+				} );
+				
+		
+				//show status (frame per second)
+				// stats = new Stats();
+// 				stats.domElement.style.position = 'absolute';
+// 				stats.domElement.style.top = '0px';
+// 				container.appendChild( stats.domElement );
+
+
+				//////////////////
+				//event listener//
+				//////////////////
+				renderer.domElement.addEventListener( 'mousemove', onMouseMove );
+				renderer.domElement.addEventListener( 'mousedown', onMouseDown, false );
+				renderer.domElement.addEventListener( 'mouseup', onMouseUp, false );
+				document.addEventListener( 'keydown', onKeyDown, false );
+				document.addEventListener( 'keyup', onKeyUp, false );
+				window.addEventListener( 'resize', onWindowResize, false );
+				
+				//show information
+				var mouse = document.createElement( 'div' );
+				mouse.setAttribute("id", "mouse");
+				mouse.style.position = 'absolute';
+				mouse.style.top = '50px';
+				mouse.style.textAlign = 'left';
+				container.appendChild( mouse );
+				
+				var state = document.createElement( 'div' );
+				state.setAttribute("id", "state");
+				state.style.position = 'absolute';
+				state.style.top = '70px';
+				state.style.textAlign = 'left';
+				container.appendChild( state );
+				
+				var command = document.createElement( 'div' );
+				command.innerHTML = "(press SHIFT button to toggle route lens)";
+				command.style.position = 'absolute';
+				command.style.top = '90px';
+				command.style.textAlign = 'left';
+				container.appendChild( command );
+
+			}
+						
+			
+			function addObject ( colour, rad, x, y, z ) {				
+				//draw object
+				var sphereMaterial = new THREE.MeshLambertMaterial(
+				    											{
+				      												color: colour
+				    											});
+		
+				// set up the sphere vars
+				var position = new THREE.Vector3(x,y,z);
+
+				// create a new mesh with sphere geometry
+				var sphere = new THREE.Mesh(
+									new THREE.SphereGeometry(rad, rad, rad),
+									sphereMaterial
+							 );
+				sphere.position.copy( position );
+				sphere.parent = contextMap;
+				sphere.visibility = false;
+
+				// add the sphere to the contextScene
+				contextScene.add(sphere);
+				
+				// store objects
+				objects.push( sphere );
+		
+			}
+			
+			
+			function addPath ( points ) {
+				//create spline curve
+				var splineCurve = new THREE.SplineCurve3(points);
+				splineCurve.needsUpdate = true;
+				
+				//create spline points
+				var splinePoints = splineCurve.getPoints(2000);
+				
+				//general setting for path
+				var segments = 200;
+				var radiusSegments = 10;
+				
+				//create 3d path
+				var path = THREE.SceneUtils.createMultiMaterialObject( 
+					//geometry
+					new THREE.TubeGeometry(splineCurve, segments, 0.5, radiusSegments, false),
+					//materials
+					[ 
+						new THREE.MeshLambertMaterial({
+							color: 0x000fff,
+							transparent: true
+						}),
+						new THREE.MeshBasicMaterial({
+							color: 0x000000
+						})
+					]
+				);
+				
+				//create object of the path which include everything
+				var pathObject = {
+					splineCurve: splineCurve,
+					splinePoints: splinePoints,
+					path: path,
+					updateSplinePoints: function () {
+						this.splinePoints = this.splineCurve.getPoints(2000);
+					}
+				}
+				
+				return pathObject;
+			}
+			
+			
+			function getVectorLine ( start, end, isResultant ) {
+				var geometry = new THREE.Geometry();
+				geometry.vertices.push( new THREE.Vector3( start.x, start.y, 0 ) );  
+				geometry.vertices.push( new THREE.Vector3( end.x, end.y, 0 ) );
+				
+				var material = new THREE.LineBasicMaterial( { 
+							linewidth: 3,
+							opacity: 1.0 } );
+				if ( isResultant == true ) {
+					material.color = new THREE.Color( 0x000000 );
+				}
+				else {
+					material.color = new THREE.Color( 0x995555 );
+				}
+				
+				return new THREE.Line( geometry, material );
+			}
+						
+			function initFocusMap( position ) {
+				//update points on path
+				if ( isOutPathArea == false && showVectorLines == true ) {
+					controls.scaledPointsOnPath = [];
+					for ( var i = 0; i < attractionVectors.length; i++ ) {
+						controls.scaledPointsOnPath.push( attractionVectors[i].pointOnPath );
+					}
+					if ( resAttractionVector != null ) {
+						controls.scaledPointsOnPath.push( resAttractionVector.clone().add(mouse) );
+					}
+				}
+						
+				controls.zoomPartial( position );
+				
+				//draw attraction vector lines
+				if ( isOutPathArea == false && showVectorLines == true ) {
+					vectorLines = [];
+					for ( var i = 0; i < attractionVectors.length; i++ ) {
+						//var line = getVectorLine( mouse, controls.scaledPointsOnPath[i], false );
+						//console.log(attractionVectors[i].normalizedAttractionVector.x,attractionVectors[i].normalizedAttractionVector.y);
+						var line = getVectorLine( mouse, attractionVectors[i].attractionVector.clone().add(mouse), false );
+						vectorLines.push( line );
+						scaledScene.add(line);
+					}
+					
+					if ( resAttractionVector != null ) {
+						//var line = getVectorLine( mouse, controls.scaledPointsOnPath[controls.scaledPointsOnPath.length-1], true );
+						var line = getVectorLine( mouse, resNormalizedAttractionVector.clone().add(mouse), true );
+						vectorLines.push( line );
+						scaledScene.add(line);
+					}
+				}
+					
+				//set lens position (OpenGL world coordinate)
+				var page = convert3dToPage(position.x, position.y, 0);
+				material.uniforms.lensPosition.value.x = page.x;
+				material.uniforms.lensPosition.value.y = HEIGHT - page.y;
+				
+				//set cursor position (OpenGL world coordinate)
+				var page = convert3dToPage(mouse.x, mouse.y, 0);
+				material.uniforms.cursorPosition.value.x = page.x;
+				material.uniforms.cursorPosition.value.y = HEIGHT - page.y;
+				
+				//update focus map
+				contextScene.remove(focusMap);
+				var size = convertPageTo3d( WIDTH, HEIGHT );
+				if ( size != null ) {
+					focusMapSize.x = Math.abs(size.x)*2;		//set width
+					focusMapSize.y = Math.abs(size.y)*2;		//set height
+					renderedSceneTexture = new THREE.WebGLRenderTarget(
+						WIDTH,
+						HEIGHT,
+						{ minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter/*NearestFilter*/ }
+					);
+			
+					//update focus texture
+					material.uniforms.focusTexture.value = renderedSceneTexture;
+				}
+				focusMap = new THREE.Mesh(
+						new THREE.PlaneGeometry( focusMapSize.x, focusMapSize.y ),
+						material
+				);
+				focusMap.position.z = 2;
+				focusMap.material.transparent = true;
+				contextScene.add(focusMap);
+			}
+			
+			
+			function getLensPosition () {
+				return convertPageTo3d( material.uniforms.lensPosition.value.x, HEIGHT - material.uniforms.lensPosition.value.y );
+			}
+			
+			
+			function updateClosestPointOnPath ( vector ) {
+				if ( controls.isPathUpdated == true ) {
+					for ( var i=0; i < pathObjects.length; i++ ) {
+						pathObjects[i].updateSplinePoints();
+					}
+					controls.isPathUpdated = false;
+					
+					setPointedPath(-1);
+				}
+				
+				var minIndexPath = -1, minPathDist = 100000;
+				attractionVectors = [];
+				
+				//for every path, find a point which is closest to the lens center
+				for (var i = 0; i < pathObjects.length; i++) {
+					var minDist = 100000, minPointIndex = -1;
+					
+					for (var j=0; j < pathObjects[i].splinePoints.length; j++) {
+						var d = dist2( vector, pathObjects[i].splinePoints[j] );
+						if(d < minDist) {
+							minDist = d;
+							minPointIndex = j;
+						}
+					}
+					
+					//if minimum distance is bigger than the path area radius,
+					//then store the path index, minimum distance, and the point
+					if ( minDist < pathArea ) {
+						//attraction function: a curve with points:
+						// x =  0    --> y =   1
+						// x = 0.5p  --> y = 0.8
+						// x =  p    --> y =   0
+						var attractionValue = 1 - ( 1.2 * sqr(minDist)/sqr(pathArea) ) + ( 0.2 * minDist / pathArea );
+						
+						var point = pathObjects[i].splinePoints[minPointIndex];
+						var attractionVector = point.clone().sub( vector );
+						attractionVector.z = 0;
+						
+						attractionVectors.push( {
+							indexPath					: i,
+							dist						: minDist,
+							pointOnPath					: point,
+							attractionVector			: attractionVector.multiplyScalar( attractionValue ),
+							normalizedAttractionVector	: attractionVector.clone().divideScalar( minDist )
+							
+						});
+						
+						//console.log( i, "att val", attractionValue, minDist );
+					}
+				}
+				
+				//calculate the normalized resultant of attraction vectors
+				if ( attractionVectors.length > 0 ) {
+					isOutPathArea = false;
+				
+					resAttractionVector = new THREE.Vector3(0,0,0);
+					resNormalizedAttractionVector = new THREE.Vector3(0,0,0);
+					for ( var i = 0; i < attractionVectors.length; i++ ) {
+						resAttractionVector.add( attractionVectors[i].attractionVector );
+						resNormalizedAttractionVector.add( attractionVectors[i].normalizedAttractionVector );
+										
+						//find the path with minimum distance
+						if ( attractionVectors[i].dist < minPathDist ) {
+							minPathDist = attractionVectors[i].dist;
+							minIndexPath = i;
+						}
+					}
+					resAttractionVector.divideScalar( attractionVectors.length );	//normalize
+					resAttractionVector.z = 0;
+					resNormalizedAttractionVector.divideScalar( attractionVectors.length );	//normalize
+					resNormalizedAttractionVector.z = 0;
+					//console.log("res^",resNormalizedAttractionVector.x, resNormalizedAttractionVector.y);
+				
+					//update pointed path index
+					if ( attractionVectors[minIndexPath].indexPath != indexPointedPath ) {
+						setPointedPath(-1);
+						indexPointedPath = attractionVectors[minIndexPath].indexPath;
+					}
+					
+					distMouse = attractionVectors[minIndexPath].dist;
+					//console.log("dist",distMouse);
+				}
+				
+				else {
+					isOutPathArea = true;
+				}
+			}
+			
+			
+			function setPointedPath ( index ) {
+				//change pointed path
+				if ( index != indexPointedPath ) {					
+					//reset color to blue
+					if ( indexPointedPath != -1 ) {
+						pathObjects[indexPointedPath].path.children[0].material.color = new THREE.Color( 0x000fff );
+					}
+					
+					indexPointedPath = index;
+				}
+
+				//update pointed path
+				if ( indexPointedPath != -1 ) {
+					//pointedPath = pathObjects[indexPointedPath].splinePoints;
+					
+					//set pointed path color to green
+					pathObjects[indexPointedPath].path.children[0].material.color = new THREE.Color( 0x00ff00 );
+				}
+			}
+			
+
+			function sqr(x) { return x * x }
+			function dist2(v, w) { return Math.sqrt( sqr(v.x - w.x) + sqr(v.y - w.y) ) }
+			function tan(v, w) { return (v.y - w.y) / (v.x - w.x) }
+			
+			
+			function convert3dToPage ( x, y, z ) {
+				var page = projector.projectVector( new THREE.Vector3(x, y, z), contextCamera );
+				page.x = ( page.x * WIDTH/2 ) + WIDTH/2;
+				page.y = - ( page.y * HEIGHT/2 ) + HEIGHT/2;
+				
+				return page;
+			}
+			function convertPageTo3d ( x, y ) {
+				var xx = ( x / WIDTH ) * 2 - 1;
+				var yy = - ( y / HEIGHT ) * 2 + 1;
+
+				var vector = new THREE.Vector3( xx, yy, 0 );
+				projector.unprojectVector( vector, contextCamera );
+				
+				var raycaster = new THREE.Raycaster( contextCamera.position, vector.sub( contextCamera.position ).normalize() );
+				
+				//find intersection points of raycast on the plane
+				var intersects = raycaster.intersectObject( contextMap );				
+				
+				if ( intersects.length > 0 ) return intersects[0].point;
+			}
+			
+			
+			function resetControl () {
+				controls.enabled = true;
+
+				SELECTED = null;
+				PICKED = null;
+				
+				container.style.cursor = 'auto';
+			}
+		
+		
+			function onMouseMove( event ) {
+				event.preventDefault();
+				
+
+				//note mouse position of 3D world coordinate
+				var tmp = convertPageTo3d(event.clientX,event.clientY);
+				var movement;
+				if ( tmp != null ) {
+					movement = tmp.clone().sub(mouse);
+					mouse = tmp;
+				}
+				
+				//contextScene.add( getVectorLine( new THREE.Vector3(0,0,0), mouse ) );
+				
+				//convert mouse position from browser coordinate to 3D coordinate
+				client.x = ( event.clientX / window.innerWidth ) * 2 - 1;
+				client.y = - ( event.clientY / window.innerHeight ) * 2 + 1;
+				var vector = new THREE.Vector3( client.x, client.y, 0 );
+				projector.unprojectVector( vector, scaledCamera );
+				var raycaster = new THREE.Raycaster( scaledCamera.position, vector.sub( scaledCamera.position ).normalize() );
+			
+				document.getElementById('mouse').innerHTML = 
+					"Mouse position: "
+					+ Math.ceil(mouse.x) + ", " 
+					+ Math.ceil(mouse.y) + ", " 
+					+ Math.ceil(mouse.z)
+				;
+				
+				
+				if ( isDrawingMode == false ) {
+					//for PICKING
+					//find intersection points of raycast on all existing objects
+					var intersects = raycaster.intersectObjects( objects, true );
+					if ( intersects.length > 0 ) {
+				
+						PICKED = intersects[ 0 ].object;
+		
+						container.style.cursor = 'pointer';
+					}
+					else {
+						PICKED = null;
+						container.style.cursor = 'auto';
+					}
+					
+					//for SELECTION and DRAGGING
+					if ( SELECTED ) {
+						SELECTED.position.add( new THREE.Vector3(movement.x,movement.y,0) );
+						
+						container.style.cursor = 'move';
+					
+						document.getElementById('state').innerHTML = 
+							"MOVING " + SELECTED
+							+ " to " + SELECTED.position.x + "," + SELECTED.position.y + "," + SELECTED.position.z
+						;
+					}
+					
+					else
+					{
+						//clean vector lines from screen
+						for ( var i = 0; i < vectorLines.length; i++ ) {
+							scaledScene.remove(vectorLines[i]);
+						}
+					
+						//for REGULAR LENS
+						if ( isMagnificationMode == true ) {
+							lensPosition.copy( mouse );
+							
+							setPointedPath(-1);
+							
+							document.getElementById('state').innerHTML = "Regular Lens";
+						}
+						
+						//for ROUTE LENS
+						else {
+							//get closest point and page to the path
+							var tmp = getLensPosition();
+							if( tmp != null ) {
+								lensPosition = tmp;
+							}
+						
+							updateClosestPointOnPath( mouse );
+							
+							//for PATH FOLLOWING within path area
+							if ( isOutPathArea == false ) {
+								lensPosition = mouse.clone().add( resNormalizedAttractionVector.clone().multiplyScalar( distMouse ) );
+							
+								setPointedPath( indexPointedPath );
+							}
+					
+							//for PATH FOLLOWING outside path area
+							else {
+								lensPosition = mouse.clone();
+							
+								setPointedPath(-1);
+							}
+							
+							document.getElementById('state').innerHTML = "Route Lens";
+						}
+						
+						//show lens
+						initFocusMap( lensPosition );
+					}
+				}	
+				
+				//for DRAWING
+				else {
+					var intersects = raycaster.intersectObject( contextMap );
+					endPoint.copy( intersects[ 0 ].point );
+				}
+			}
+			
+			
+			function onMouseDown( event ) {
+
+				event.preventDefault();
+				
+				var vector = new THREE.Vector3( client.x, client.y, 0 );
+				projector.unprojectVector( vector, scaledCamera );
+
+				var raycaster = new THREE.Raycaster( scaledCamera.position, vector.sub( scaledCamera.position ).normalize() );
+
+
+				if ( isDrawingMode == false ) {
+					//for SELECTION & DRAGGING
+					//find intersection points of raycast on all existing objects
+					var intersects = raycaster.intersectObjects( objects );
+					if ( intersects.length > 0 ) {
+						controls.enabled = false;
+
+						SELECTED = intersects[ 0 ].object;
+
+						container.style.cursor = 'move';
+					}
+				}
+				
+				
+				//for DRAWING
+				else {					
+					//note start point (a point on the plane intersected by the raycaster)
+					var intersects = raycaster.intersectObject( contextMap );
+					startPoint.copy( intersects[ 0 ].point );
+					
+					container.style.cursor = 'crosshair';
+				}
+
+			}
+
+			function onMouseUp( event ) {
+				
+				event.preventDefault();
+
+				//for SELECTION & DRAGGING and ROUTE LENS
+				if ( isDrawingMode == false ) {
+					resetControl();
+				}
+				
+				//for DRAWING
+				else {
+					var rad = Math.abs(startPoint.x - endPoint.x);
+					addObject( 0x0000ff, rad/2, startPoint.x + (rad/2), startPoint.y - (rad/2), startPoint.z );
+				}
+				
+				console.log("new THREE.Vector3("+mouse.x+", "+mouse.y+", 0),");
+
+			}
+			
+			function onKeyDown( event ) {
+				switch( event.keyCode ) {
+
+					case 68: //d
+						if ( SELECTED == null ) {
+							isDrawingMode = true;
+							controls.enabled = false;
+							
+							container.style.cursor = 'crosshair';
+							
+							document.getElementById('state').innerHTML = "DRAW MODE: ON";
+						}
+						break;
+				}
+
+			}			
+			
+			
+			function onKeyUp( event ) {
+				
+				switch ( event.keyCode ) {
+
+					case 68: //d
+						if ( SELECTED == null ) {
+							isDrawingMode = false;
+							resetControl();
+						}
+						break;
+					
+					case 16: //shift
+					case 83: //s
+						isMagnificationMode = !isMagnificationMode;
+						
+						if ( isMagnificationMode ) {
+							initFocusMap( mouse );
+						}
+						
+						document.getElementById('state').innerHTML = 
+							"MAGNIFICATION MODE: " + isMagnificationMode
+						;
+						break;
+						
+					//show lens edge
+					case  76: //l
+						material.uniforms.showLensEdge.value = ( material.uniforms.showLensEdge.value == 0.0 ? 1.0 : 0.0 );
+						break;
+						
+					//show vector lines
+					case 86: //v
+						showVectorLines = !showVectorLines;
+				}
+
+			}
+			
+			
+			function onWindowResize() {
+				WIDTH = window.innerWidth;
+				HEIGHT = window.innerHeight;
+				
+				contextCamera.aspect = WIDTH / HEIGHT;
+				contextCamera.updateProjectionMatrix();
+				
+				scaledCamera.aspect = WIDTH / HEIGHT;
+				scaledCamera.updateProjectionMatrix();
+
+				renderer.setSize( WIDTH, HEIGHT );
+				focusRenderer.setSize( WIDTH, HEIGHT );
+
+			}
+		
+		
+			function animate() {
+
+				requestAnimationFrame( animate );
+				render();
+				//stats.update();
+
+			}
+
+
+			function render() {
+
+				controls.update();
+				
+				renderer.clear();
+
+				renderer.render( scaledScene, scaledCamera, renderedSceneTexture, true );
+				
+				renderer.render( scaledScene, scaledCamera );
+
+				renderer.render( contextScene, contextCamera );
+
+			}
+				
+		
+		</script>
+		
+	</body>
+</html>
